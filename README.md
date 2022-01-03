@@ -1,1 +1,1 @@
-# momo-fukuwarai
+# 笑う門には福来たるよ。
