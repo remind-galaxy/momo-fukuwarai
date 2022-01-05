@@ -50,24 +50,49 @@ var ASSETS = {
 /*
  * 定数
  */
-// パラメータ
 var SCREEN_WIDTH   = 900; // 画面の幅
 var SCREEN_HEIGHT  = 900; // 画面の高さ
 var PICTURE_WIDTH  = 800; // 背景画像の横幅
 var PICTURE_HEIGHT = 800; // 背景画像の高さ
 var NOSE_X         = 500; // 鼻のX座標
-var NOSE_Y         = 552; // 鼻のY座標
-var NOSE_WIDTH     = 80;  // 鼻の幅
-var NOSE_HEIGHT    = 60;  // 鼻の高さ
+var NOSE_Y         = 545; // 鼻のY座標
+var NOSE_WIDTH     = 90;  // 鼻の幅
+var NOSE_HEIGHT    = 70;  // 鼻の高さ
 var FSIZE_LARGE    = 30;  // 文字サイズ（大きい文字）
-var FSIZE_SMALL    = 10;  // 文字サイズ（普通の文字）
-var BG_COLOR       = '#fbfafa'; // 背景色
+//var FSIZE_SMALL    = 10;  // 文字サイズ（普通の文字）
+var PARTS_INIT_X   = 70;  // 顔パーツの初期位置
+var PARTS_INIT_Y   = 70;  // 顔パーツの初期位置
+var SPEED_INIT     = 15;  // 初速
+var BG_COLOR       = '#fbfafa';    // 背景色
+var FONT_COLOR     = '#000000';    // ラベルの色
+var FONT_FAMILY    = 'sans-serif'; // フォントの種類
+// 顔パーツを配置していく順番の配列
+var SEQUENCE_ARRAY = [['nose' ,'leye' ,'lbrow','reye' ,'rbrow','mouth'],
+                      ['lbrow','reye' ,'leye' ,'rbrow','nose' ,'mouth'],
+                      ['rbrow','nose' ,'reye' ,'leye' ,'lbrow','mouth'],
+                      ['reye' ,'lbrow','rbrow','nose' ,'leye' ,'mouth'],
+                      ['leye' ,'rbrow','nose' ,'lbrow','reye' ,'mouth']];
 
 /*
  * 変数
  */
-//var
-
+var HEAD_LABEL; // 上部に表示するラベル
+var BACK_PIC;   // 背景の画像
+var PARTS;      // 顔パーツオブジェクト（左上に表示するときのみ使用）
+var SEQUENCE;   // 顔パーツの配置順
+var MARK_X;     // 横方向パーツ位置決め用オブジェクト
+var MARK_Y;     // 縦方向パーツ位置決め用オブジェクト
+var MARK_MOVE   = false; // 位置決め用オブジェクトを動かすときだけtrueにする
+var DIRECTION   = true;  // 位置決め用オブジェクトの移動方向（trueは右or下）
+var FUKU_INIT   = false; // 各ステップでの初期化フラグ
+var MARK_X_FLAG = false; // 横方向位置決め処理フラグ
+var MARK_Y_FLAG = false; // 縦方向位置決め処理フラグ
+var ROTATE_FLAG = false; // 回転角度決めフラグ
+var PARTS_FLAG  = false; // 顔パーツ配置処理フラグ
+var SPEED       = 0;     // 移動速度
+var PARTS_ANGLE = 0;     // パーツの角度
+var FUKU_STEP   = -1;    // 処理ステップ
+var RAND        = 0;     // オブジェクトの減速処理時に乱数を格納するため
 /*
  * メインシーン
  */
@@ -81,15 +106,16 @@ phina.define("MainScene", {
     // 背景色
     this.backgroundColor = BG_COLOR;
     // 背景を生成, 表示
-    var back = Sprite('comp').addChildTo(this)
+    this.BACK_PIC = Sprite('comp').addChildTo(this)
       .setPosition(SCREEN_WIDTH - PICTURE_WIDTH / 2, SCREEN_HEIGHT - PICTURE_HEIGHT / 2);
     // 最初のラベルを表示
-    var label = Label({
-      text       : '鼻のあたりをクリック，またはタップで開始',
+    this.HEAD_LABEL = Label({
+      text       : '鼻のあたりをクリックまたはタップで開始',
       fontSize   : FSIZE_LARGE,
-      fontFamily : 'sans-serif',
+      fontFamily : FONT_FAMILY,
+      fill       : FONT_COLOR,
     }).addChildTo(this)
-      .setPosition(SCREEN_WIDTH / 2, (SCREEN_HEIGHT - PICTURE_HEIGHT) / 2);
+      .setPosition(SCREEN_WIDTH / 2, (SCREEN_HEIGHT - PICTURE_HEIGHT) * 0.4);
     // 鼻のあたりクリック用オブジェクト
     var hana = RectangleShape({
       stroke      : BG_COLOR,
@@ -103,47 +129,218 @@ phina.define("MainScene", {
     // 鼻のあたりをクリックしたときの処理
     hana.onpointstart = () => {
       console.log('鼻のあたりをクリック'); // コンソールにデバッグ
-      hana.width  = 0; // オブジェクトをクリック出来なくする
-      hana.height = 0; // オブジェクトをクリック出来なくする
-      hana.hide(); // オブジェクトを非表示にする
-      label.hide(); // 最初のラベルを非表示にする
-      this.fukuwarai_prepare(); // 福笑い準備メソッドを実行
+      // オブジェクトを見えなくしてクリック出来なくする
+      hana.width  = 0; 
+      hana.height = 0;
+      // 福笑い準備メソッドを実行する
+      this.fukuwarai_prepare();
     };
-
+  /* 以下，デバッグ用スペース */
+  /* 以上，デバッグ用スペース */
   },
-  // 毎フレーム更新
+  // 毎フレーム更新（他のメソッドの実行とは別に，割り込みで常に実行される）
   update : function(app) {
-    /*
-    // クリアチェック
-    if (this.bugNum <= 0) {
-      // 経過時間
-      var time = Math.floor(app.frame / app.fps);
-      var msg  = time + "秒でクリアしました!!";
-      // ゲーム終了
-      this.exit({
-          message: msg,
-      });
+    //console.log('毎フレーム更新'); // コンソールにデバッグ
+    // 処理ステップを進める
+    if (this.FUKU_STEP >= 0 && this.FUKU_STEP < 6) {
+      // (1) 顔パーツの配置
+      if (this.FUKU_INIT) {
+        this.PARTS_ANGLE = Math.random() * 360; // パーツの初期角度を設定
+        this.PARTS = Sprite(this.SEQUENCE[this.FUKU_STEP]).addChildTo(this)
+          .setPosition(PARTS_INIT_X, PARTS_INIT_Y)
+          .setRotation(this.PARTS_ANGLE);
+        this.FUKU_INIT = false;
+        this.MARK_MOVE = true;
+        this.SPEED = SPEED_INIT; // 速度リセット
+        this.DIRECTION = true; // 向きリセット
+        this.MARK_X_FLAG = true;
+      }
+      // (2) 横方向位置決め
+      if (this.MARK_X_FLAG) {
+        if (this.SPEED > 0) { // 動いている間
+          if (DIRECTION) { // 右に動く
+            this.MARK_X.moveBy(this.SPEED, 0);
+            if (this.MARK_X.x >= SCREEN_WIDTH - PICTURE_WIDTH * 0.1) {
+              DIRECTION = false; // 折り返す
+            }
+          } else { // 左に動く
+            this.MARK_X.moveBy(-this.SPEED, 0);
+            if (this.MARK_X.x <= SCREEN_WIDTH - PICTURE_WIDTH * 0.9) {
+              DIRECTION = true; // 折り返す
+            }
+          }
+          if (!this.MARK_MOVE) { // 減速
+            if (this.SPEED == SPEED_INIT) { // 減速処理開始前の1回だけ実行
+              this.RAND = Math.random();
+            }
+            this.SPEED -= SPEED_INIT / (30 + this.RAND * 10);
+          }
+        } else { // 止まったあと
+          this.SPEED = SPEED_INIT; // 速度リセット
+          this.DIRECTION = true; // 向きリセット
+          this.MARK_MOVE = true; // 位置決めフラグ立てる
+          this.MARK_X_FLAG = false;
+          this.MARK_Y_FLAG = true;
+        }
+      }
+      // (3) 縦方向位置決め
+      if (this.MARK_Y_FLAG) {
+        if (this.SPEED > 0) { // 動いている間
+          if (DIRECTION) { // 下に動く
+            this.MARK_Y.moveBy(0, this.SPEED);
+            if (this.MARK_Y.y >= SCREEN_HEIGHT - PICTURE_HEIGHT * 0.1) {
+              DIRECTION = false; // 折り返す
+            }
+          } else { // 上に動く
+            this.MARK_Y.moveBy(0, -this.SPEED);
+            if (this.MARK_Y.y <= SCREEN_WIDTH - PICTURE_WIDTH * 0.9) {
+              DIRECTION = true; // 折り返す
+            }
+          }
+          if (!this.MARK_MOVE) { // 減速
+            if (this.SPEED == SPEED_INIT) { // 減速処理開始前の1回だけ実行
+              this.RAND = Math.random();
+            }
+            this.SPEED -= SPEED_INIT / (30 + this.RAND * 10);
+          }
+        } else { // 止まったあと
+          this.SPEED = SPEED_INIT; // 速度リセット
+          if(Math.random() > 0.5) { // 向きはランダム
+            DIRECTION = true;
+          } else {
+            DIRECTION = false;
+          }
+          this.MARK_MOVE = true; // 位置決めフラグを立てる
+          this.ROTATE_FLAG = true; // 回転角度決めフラグを立てる
+          this.MARK_Y_FLAG = false;
+        }
+      }
+      // (4) 回転角度決め
+      if (this.ROTATE_FLAG) {
+        if (this.SPEED > 0) {
+          if (DIRECTION) {
+            this.PARTS_ANGLE += this.SPEED / 2;
+          } else {
+            this.PARTS_ANGLE -= this.SPEED / 2;
+          }
+          this.PARTS.setRotation(this.PARTS_ANGLE);
+          if (!this.MARK_MOVE) { // 減速
+            if (this.SPEED == SPEED_INIT) { // 減速処理開始前の1回だけ実行
+              this.RAND = Math.random();
+            }
+            this.SPEED -= SPEED_INIT / (15 + this.RAND * 5);
+          }
+        } else {
+          this.SPEED = 0; // 速度ゼロにする
+          this.DIRECTION = true; // 向きリセット
+          this.ROTATE_FLAG = false;
+          this.PARTS_FLAG = true;
+        }
+      }
+      // (5) 決まった場所，決まった角度でパーツを配置
+      if (this.PARTS_FLAG) {
+        var face = this.PARTS;
+        face.setPosition(this.MARK_X.x, this.MARK_Y.y);
+        this.PARTS_FLAG = false;
+        this.FUKU_STEP++; // 処理ステップを1つ進める
+        this.FUKU_INIT = true; // (1) 顔パーツ配置に戻る
+      }
+    } else if (this.FUKU_STEP >= 6) { // 顔パーツをすべて配置し終えた後の処理
+      // 終了処理
+      this.HEAD_LABEL.hide(); // ヘッダーラベルを非表示にする
+      this.MARK_X.hide(); // 位置決め用マークを非表示非表示にする
+      this.MARK_Y.hide();
+      this.pointer.width = 0; // クリックイベント取得用オブジェクトを見えなくする
+      this.pointer.height = 0;
+      // ラベルを表示
+      var label_fuku = Label({
+        text       : '笑う門には福来たるよ。',
+        fontSize   : 60,
+        fontWeight : 900,
+        fill       : '#000000',
+        fontFamily : 'serif',
+      }).addChildTo(this)
+        .setPosition(SCREEN_WIDTH / 2, (SCREEN_HEIGHT - PICTURE_HEIGHT) * 0.5);
+      var label_momo = Label({
+        text       : 'by 高田もも',
+        fontSize   : 30,
+        fontWeight : 100,
+        fill       : '#000000',
+        fontFamily : 'serif',
+      }).addChildTo(this)
+        .setPosition(SCREEN_WIDTH * 0.85, (SCREEN_HEIGHT - PICTURE_HEIGHT) * 0.95);
+      // 処理ステップを-1にして，移行処理が実行されないようにする
+      this.FUKU_STEP = -1;
     }
-    */
   },
   // 福笑い用の画面に切り替え
   fukuwarai_prepare : function() {
     console.log('福笑い準備'); // コンソールにデバッグ
     // 福笑い用の顔（のっぺらぼう）を配置
-    var back = Sprite('base').addChildTo(this)
+    this.BACK_PIC = Sprite('base').addChildTo(this)
       .setPosition(SCREEN_WIDTH - PICTURE_WIDTH / 2, SCREEN_HEIGHT - PICTURE_HEIGHT / 2);
-    
+    // ラベルを変更する
+    this.HEAD_LABEL.text = '高田ももの福笑いまで......';
+    // カウントラベル
+    var countLabel = Label({
+      text       : '',
+      fontSize   : 140,
+      fill       : FONT_COLOR,
+      fontFamily : FONT_FAMILY,
+    }).addChildTo(this)
+      .setPosition(NOSE_X, NOSE_Y);
+    // カウントダウンスタート
+    countLabel.tweener.set({text: '3', alpha: 0}).fadeIn(700)
+                      .set({text: '2', alpha: 0}).fadeIn(700)
+                      .set({text: '1', alpha: 0}).fadeIn(700)
+                      .call(function() {
+                        countLabel.hide();
+                        this.fukuwarai();
+                      }, this).play();
   },
-  /*
-  // クリックイベントを取得
-  onpointstart: function() {
-    console.log('point start!'); // コンソールにデバッグ
-    // 背景を生成, 表示
-    var back_base = Sprite('base').addChildTo(this);
-    back_base.setPosition(SCREEN_WIDTH - PICTURE_WIDTH / 2,
-                          SCREEN_HEIGHT - PICTURE_HEIGHT / 2);
+  // 福笑い本番動作
+  fukuwarai : function() {
+    console.log('福笑い本番動作'); // コンソールにデバッグ
+    var random = Math.floor(Math.random() * 5); // 0~4の乱数生成
+    //console.log(random); // コンソールにデバッグ
+    this.SEQUENCE = SEQUENCE_ARRAY[random];
+    // クリック取得用オブジェクトを生成
+    this.pointer = RectangleShape({
+      stroke      : BG_COLOR,
+      strokeWidth : 0,
+      fill        : 0,
+      width       : SCREEN_WIDTH,
+      height      : SCREEN_HEIGHT,
+    }).addChildTo(this)
+      .setPosition(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)
+      .setInteractive(true);
+    // クリック時の処理
+    this.pointer.onpointstart = () => {
+      //console.log('画面クリック'); // コンソールにデバッグ
+      this.MARK_MOVE = false; // 位置決めを無効にする
+    };
+    // ラベルを表示
+    this.HEAD_LABEL.text = '←← のパーツの位置を決めます\nいい感じのところでクリック！';
+    // 横方向位置決め用目印を描画
+    this.MARK_X = TriangleShape({
+      radius      : 20,
+      strokeWidth : 0,
+      fill        : '#000000',
+    }).addChildTo(this)
+      .setPosition(SCREEN_WIDTH - PICTURE_WIDTH * 0.9, SCREEN_HEIGHT - PICTURE_HEIGHT)
+      .setRotation(60);
+    // 縦方向位置決め用目印を描画
+    this.MARK_Y = TriangleShape({
+      radius      : 20,
+      strokeWidth : 0,
+      fill        : '#000000',
+    }).addChildTo(this)
+      .setPosition(SCREEN_WIDTH - PICTURE_WIDTH, SCREEN_HEIGHT - PICTURE_HEIGHT * 0.9)
+      .setRotation(90);
+    // 処理ステップを進めていく
+    this.FUKU_STEP = 0; // 処理ステップを0にする
+    this.FUKU_INIT = true; // 初期化フラグを立てる
   },
-  */
 });
 
 /*
